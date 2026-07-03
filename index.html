@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>The Floor is Pranked! (2-Player Troll Game)</title>
+    <style>
+        body {
+            margin: 0;
+            background: linear-gradient(135deg, #1e1e2f, #111119);
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        h1 {
+            margin: 5px;
+            text-shadow: 0 0 10px #ff00ff;
+            font-size: 24px;
+        }
+        #instructions {
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #a0a0c0;
+            text-align: center;
+        }
+        canvas {
+            border: 4px solid #444;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+            background: #252538;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>⚠️ THE FLOOR IS PRANKED! ⚠️</h1>
+    <div id="instructions">
+        <strong>P1 (Blue):</strong> WASD to Move | <strong>P2 (Red):</strong> Arrow Keys to Move <br>
+        <em>Watch out... some blocks are dirty liars! Get both players to their Trophies!</em>
+    </div>
+
+    <canvas id="gameCanvas" width="800" height="500"></canvas>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+// Game State
+let gameOver = false;
+let victory = false;
+let announcement = "";
+
+// Player Setup
+const p1 = { x: 50, y: 400, w: 25, h: 25, vx: 0, vy: 0, color: "#00d2ff", speed: 4, jump: -11, grounded: false, won: false };
+const p2 = { x: 90, y: 400, w: 25, h: 25, vx: 0, vy: 0, color: "#ff3b30", speed: 4, jump: -11, grounded: false, won: false };
+
+// Input tracking
+const keys = {};
+window.addEventListener("keydown", e => keys[e.key] = true);
+window.addEventListener("keyup", e => keys[e.key] = false);
+
+// Map Elements (Decorations & Trolls!)
+const platforms = [
+    // Safe Starting ground
+    { x: 0, y: 460, w: 250, h: 40, color: "#4e4e70", type: "normal" },
+    
+    // Troll Platform 1: Looks normal, but collapses instantly!
+    { x: 300, y: 390, w: 120, h: 20, color: "#4e4e70", originalColor: "#4e4e70", type: "troll-fall", stepped: false, timer: 0 },
+    
+    // Safe platform middle
+    { x: 480, y: 320, w: 100, h: 20, color: "#4e4e70", type: "normal" },
+    
+    // Troll Platform 2: Fake Springboard! Launches you backwards into the pit if you jump on it
+    { x: 280, y: 240, w: 100, h: 20, color: "#ffcc00", type: "troll-launch" },
+
+    // Top safe zone 
+    { x: 50, y: 160, w: 160, h: 20, color: "#4e4e70", type: "normal" },
+    { x: 620, y: 160, w: 150, h: 40, color: "#4e4e70", type: "normal" }
+];
+
+// Lava pit at the bottom
+const lava = { x: 0, y: 485, w: 800, h: 15 };
+
+// Goals
+const p1Goal = { x: 660, y: 110, w: 30, h: 50, color: "#00d2ff", reached: false };
+const p2Goal = { x: 710, y: 110, w: 30, h: 50, color: "#ff3b30", reached: false };
+
+function updatePlayer(p, isP1) {
+    if (p.won) return;
+
+    // Movement Controls
+    if (isP1) {
+        if (keys['a'] || keys['A']) p.vx = -p.speed;
+        else if (keys['d'] || keys['D']) p.vx = p.speed;
+        else p.vx = 0;
+
+        if ((keys['w'] || keys['W']) && p.grounded) {
+            p.vy = p.jump;
+            p.grounded = false;
+        }
+    } else {
+        if (keys['ArrowLeft']) p.vx = -p.speed;
+        else if (keys['ArrowRight']) p.vx = p.speed;
+        else p.vx = 0;
+
+        if (keys['ArrowUp'] && p.grounded) {
+            p.vy = p.jump;
+            p.grounded = false;
+        }
+    }
+
+    // Apply Gravity
+    p.vy += 0.5;
+    p.x += p.vx;
+    p.y += p.vy;
+
+    // Screen boundaries
+    if (p.x < 0) p.x = 0;
+    if (p.x + p.w > canvas.width) p.x = canvas.width - p.w;
+
+    p.grounded = false;
+
+    // Platform Collisions
+    platforms.forEach(plat => {
+        if (p.x < plat.x + plat.w && p.x + p.w > plat.x && p.y < plat.y + plat.h && p.y + p.h > plat.y) {
+            // Collision from top
+            if (p.vy > 0 && p.y + p.h - p.vy <= plat.y + 1) {
+                p.y = plat.y - p.h;
+                p.vy = 0;
+                p.grounded = true;
+
+                // Handle Troll Mechanics!
+                if (plat.type === "troll-fall") {
+                    plat.stepped = true;
+                    plat.color = "#ff4444"; // turns red warning you
+                    announcement = "TROLL! Platform is breaking!";
+                }
+                if (plat.type === "troll-launch") {
+                    p.vy = -18; // Launches high
+                    p.vx = -15; // Blasts them backwards into the hazard!
+                    p.x -= 20;
+                    announcement = "BOING! Wrong way!";
+                }
+            }
+        }
+    });
+
+    // Check Lava Death
+    if (p.x < lava.x + lava.w && p.x + p.w > lava.x && p.y < lava.y + lava.h && p.y + p.h > lava.y) {
+        gameOver = true;
+        announcement = "You got trolled by the lava! Refresh to try again.";
+    }
+}
+
+function gameLoop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Update breaking platforms
+    platforms.forEach(plat => {
+        if (plat.type === "troll-fall" && plat.stepped) {
+            plat.timer += 1;
+            if (plat.timer > 30) { // drops after half a second
+                plat.y += 10;
+            }
+        }
+    });
+
+    // Process Players
+    if (!gameOver && !victory) {
+        updatePlayer(p1, true);
+        updatePlayer(p2, false);
+
+        // Check Goals
+        if (p1.x < p1Goal.x + p1Goal.w && p1.x + p1.w > p1Goal.x && p1.y < p1Goal.y + p1Goal.h && p1.y + p1.h > p1Goal.y) {
+            p1.won = true;
+        }
+        if (p2.x < p2Goal.x + p2Goal.w && p2.x + p2.w > p2Goal.x && p2.y < p2Goal.y + p2Goal.h && p2.y + p2.h > p2Goal.y) {
+            p2.won = true;
+        }
+
+        if (p1.won && p2.won) {
+            victory = true;
+            announcement = "VICTORY! You survived Level 1!";
+        }
+    }
+
+    // DRAW GRAPHICS & DECORATIONS
+
+    // Draw Background Mountains/Decor
+    ctx.fillStyle = "#2d2d44";
+    ctx.beginPath(); ctx.moveTo(0, 500); ctx.lineTo(200, 250); ctx.lineTo(400, 500); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(300, 500); ctx.lineTo(550, 200); ctx.lineTo(800, 500); ctx.fill();
+
+    // Draw Platforms
+    platforms.forEach(plat => {
+        ctx.fillStyle = plat.color;
+        ctx.fillRect(plat.x, plat.y, plat.w, plat.h);
+        // Vine trim detail on platforms
+        ctx.fillStyle = "#556b2f";
+        ctx.fillRect(plat.x, plat.y, plat.w, 4);
+    });
+
+    // Draw Lava
+    ctx.fillStyle = "#ff4500";
+    ctx.fillRect(lava.x, lava.y, lava.w, lava.h);
+    // Glow effect on lava
+    ctx.fillStyle = "#ff8c00";
+    for(let i=0; i<canvas.width; i+=20) {
+        ctx.fillRect(i, lava.y - (Math.sin(Date.now()/200 + i)*3), 10, 5);
+    }
+
+    // Draw Goals (Trophies)
+    ctx.fillStyle = p1Goal.color;
+    ctx.fillRect(p1Goal.x, p1Goal.y, p1Goal.w, p1Goal.h);
+    ctx.fillStyle = p2Goal.color;
+    ctx.fillRect(p2Goal.x, p2Goal.y, p2Goal.w, p2Goal.h);
+    
+    // Draw Text on Trophies
+    ctx.fillStyle = "#fff";
+    ctx.font = "10px sans-serif";
+    ctx.fillText("P1 WIN", p1Goal.x - 5, p1Goal.x - 120);
+
+    // Draw Players
+    if(!p1.won) {
+        ctx.fillStyle = p1.color;
+        ctx.fillRect(p1.x, p1.y, p1.w, p1.h);
+        // Face details
+        ctx.fillStyle = "#000"; ctx.fillRect(p1.x+4, p1.y+6, 4, 4); ctx.fillRect(p1.x+15, p1.y+6, 4, 4);
+    }
+    if(!p2.won) {
+        ctx.fillStyle = p2.color;
+        ctx.fillRect(p2.x, p2.y, p2.w, p2.h);
+        // Face details
+        ctx.fillStyle = "#000"; ctx.fillRect(p2.x+4, p2.y+6, 4, 4); ctx.fillRect(p2.x+15, p2.y+6, 4, 4);
+    }
+
+    // Announce alerts / Game Over text
+    if(announcement !== "") {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+        ctx.fillRect(0, 0, canvas.width, 50);
+        ctx.fillStyle = "#fff";
+        ctx.font = "16px 'Courier New'";
+        ctx.textAlign = "center";
+        ctx.fillText(announcement, canvas.width/2, 30);
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// Start the game!
+gameLoop();
+</script>
+</body>
+</html>
